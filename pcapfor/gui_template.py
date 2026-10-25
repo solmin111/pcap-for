@@ -73,7 +73,7 @@ nav a:hover{color:var(--text)}
 .topo-wrap{display:grid;grid-template-columns:1fr 290px;gap:14px}
 #topo{width:100%;height:600px;background:var(--panel);border:1px solid var(--border);border-radius:10px}
 #topo line{stroke:#3a4556}
-#topo text{fill:var(--muted);font-size:10px;font-family:Consolas,monospace}
+#topo text{fill:var(--muted);font-size:9.5px;font-family:Consolas,monospace}
 #topo circle{cursor:pointer}
 .legend{display:flex;gap:16px;color:var(--muted);font-size:11.5px;margin-top:8px;flex-wrap:wrap}
 .legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
@@ -98,6 +98,12 @@ table.list tr.fl td{background:#241a1a}
 #tl-svg text{fill:var(--muted);font-size:10.5px}
 #tl-svg line.grid{stroke:#232c3a}
 #tl-svg circle{cursor:pointer;stroke:rgba(0,0,0,.4);stroke-width:1}
+#tl-svg text.cnt{fill:#fff;font-size:10px;font-weight:700;pointer-events:none}
+.tl-ctrl{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:12px}
+.tl-ctrl input[type=range]{flex:1;max-width:220px;accent-color:var(--accent)}
+.tl-ctrl button{background:var(--panel2);color:var(--text);border:1px solid var(--border);
+ border-radius:6px;padding:3px 12px;font-size:11.5px;cursor:pointer;font-family:inherit}
+.tl-ctrl button:hover{border-color:var(--accent)}
 /* ---------- 증거 뷰어 ---------- */
 .ev-wrap{display:grid;grid-template-columns:270px 1fr;gap:14px;align-items:start}
 .ev-item{border:1px solid var(--border);border-left:3px solid var(--high);background:var(--panel2);
@@ -193,7 +199,14 @@ table.list tr.fl td{background:#241a1a}
   </section>
 
   <section id="tab-timeline" class="tab hidden">
-    <div class="panel"><div class="ptitle">Attack chronology — 탐지기 레인별 발생 시각 (점 클릭 = 상세)</div>
+    <div class="panel"><div class="ptitle">Attack chronology — 탐지기 레인별 발생 시각 (점 클릭 = 상세, 숫자 배지 = 겹친 탐지 수)</div>
+      <div class="tl-ctrl">
+        <span class="muted">구간 확대</span>
+        <input type="range" id="tl-a" min="0" max="95" value="0">
+        <input type="range" id="tl-b" min="5" max="100" value="100">
+        <span id="tl-range" class="muted"></span>
+        <button id="tl-reset">전체 보기</button>
+      </div>
       <svg id="tl-svg"></svg>
       <div class="axis" id="tl-x"></div></div>
     <div id="tl-detail"></div>
@@ -363,7 +376,23 @@ function layout(nodes, edges, W, H){
     });
     ids.forEach(id=>{ const p=pos[id];
       p.x += (W/2-p.x)*0.028; p.y += (H/2-p.y)*0.028;
-      p.x = Math.max(40,Math.min(W-40,p.x)); p.y = Math.max(32,Math.min(H-36,p.y)); });
+      p.x = Math.max(56,Math.min(W-56,p.x)); p.y = Math.max(34,Math.min(H-46,p.y)); });
+  }
+  // 분리 패스: 경계 클램핑으로 겹쳐 쌓인 노드들을 최소 간격(32px)으로 벌린다
+  for (let k=0; k<80; k++){
+    let moved = false;
+    for (let i=0;i<ids.length;i++) for (let j=i+1;j<ids.length;j++){
+      const p=pos[ids[i]], q=pos[ids[j]];
+      let dx=q.x-p.x, dy=q.y-p.y, d=Math.sqrt(dx*dx+dy*dy);
+      if (d < 32){
+        if (d < 0.1){ dx = (i%2? 1:-1); dy = (j%2? 1:-1); d = 1.4; }
+        const push=(32-d)/2/d;
+        p.x-=dx*push; p.y-=dy*push; q.x+=dx*push; q.y+=dy*push;
+        [p,q].forEach(n=>{ n.x=Math.max(56,Math.min(W-56,n.x)); n.y=Math.max(34,Math.min(H-46,n.y)); });
+        moved = true;
+      }
+    }
+    if (!moved) break;
   }
 }
 function renderTopo(){
@@ -378,11 +407,17 @@ function renderTopo(){
     const col = e.flagged ? 'rgba(255,138,76,.55)' : '#3a4556';
     out += '<line x1="'+p.x+'" y1="'+p.y+'" x2="'+q.x+'" y2="'+q.y+'" stroke="'+col+'" stroke-width="'+w.toFixed(1)+'"/>';
   });
+  // 노드가 많으면 주요 노드(탐지 연루·내부·통신량 상위)만 라벨을 붙인다. 나머지는 툴팁/클릭.
+  const many = g.nodes.length > 16;
+  const topBytes = [...g.nodes].sort((a,b)=>b.bytes-a.bytes).slice(0,8).map(n=>n.id);
   g.nodes.forEach(n=>{
     const p=pos[n.id], r = Math.min(17, 7+Math.log10(n.bytes+10));
+    const showLabel = !many || n.sev || n.internal || topBytes.includes(n.id) || selectedIp===n.id;
+    const tx = Math.max(44, Math.min(W-44, p.x));  // 라벨이 캔버스 밖으로 잘리지 않게
     out += '<circle data-ip="'+esc(n.id)+'" cx="'+p.x+'" cy="'+p.y+'" r="'+r.toFixed(1)+'" fill="'+nodeColor(n)+'"'+
-           (selectedIp===n.id?' stroke="#fff" stroke-width="2.5" stroke-dasharray="4 3"':'')+'/>' +
-           '<text x="'+p.x+'" y="'+(p.y+r+13)+'" text-anchor="middle">'+esc(n.id)+'</text>';
+           (selectedIp===n.id?' stroke="#fff" stroke-width="2.5" stroke-dasharray="4 3"':'')+'>'+
+           '<title>'+esc(n.id)+'</title></circle>' +
+           (showLabel ? '<text x="'+tx+'" y="'+(p.y+r+12)+'" text-anchor="middle">'+esc(n.id)+'</text>' : '');
   });
   svg.innerHTML = out;
   svg.querySelectorAll('circle').forEach(c => c.onclick = () => { selectedIp=c.dataset.ip; renderTopo(); renderTopoPanel(); });
@@ -410,43 +445,77 @@ const CATS = [['recon','정찰'],['bruteforce','계정 공격'],['credential','�
               ['webattack','웹 공격'],['c2','C2/유출'],['spoofing','스푸핑'],['ioc','IOC']];
 const SEVC = {critical:'var(--crit)', high:'var(--high)', medium:'var(--med)',
               low:'var(--low)', info:'var(--info)'};
+let tlWin = {a: 0, b: 100};  // 보이는 구간 (전체 범위의 %)
+function fCard(f){
+  return '<div class="panel det-full">'+fBadge(f)+
+    '<span class="cat">'+(f.ts?new Date(f.ts*1000).toISOString().substr(11,8)+' UTC':'시각 미상')+'</span>'+
+    '<div style="font-weight:700;margin-top:6px">'+esc(f.title)+'</div>'+
+    '<div class="d">'+esc(f.desc)+'</div>'+
+    f.evidence.map(e=>'<div class="e">· '+esc(e)+'</div>').join('')+
+    (f.mitre && f.mitre!=='-' ? '<div class="m">MITRE ATT&CK: '+esc(f.mitre)+'</div>':'')+
+    (f.reco ? '<div class="r">대응: '+esc(f.reco)+'</div>':'')+'</div>';
+}
 function renderTimelineTab(){
   const svg = $('tl-svg'), W = svg.clientWidth||900, H = 340, L = 92, R = 20;
   svg.setAttribute('viewBox','0 0 '+W+' '+H);
   const tl = S.timeline;
-  const t0 = tl.t0, t1 = tl.t0 + Math.max(tl.bins.length,1)*tl.dt;
+  const T0 = tl.t0, T1 = tl.t0 + Math.max(tl.bins.length,1)*tl.dt;
+  const span = Math.max(T1-T0, 1);
+  const w0 = T0 + span*tlWin.a/100, w1 = T0 + span*tlWin.b/100;  // 보이는 창
   const lanes = CATS.filter(c => S.findings.some(f=>f.cat===c[0]));
   if (!lanes.length){ svg.innerHTML='<text x="20" y="30">탐지가 없어 타임라인이 비어 있습니다.</text>'; $('tl-x').innerHTML=''; return; }
   const laneH = Math.min(44, (H-30)/lanes.length);
-  const x = ts => L + Math.max(0,Math.min(1,(ts-t0)/Math.max(t1-t0,1)))*(W-L-R);
+  const x = ts => L + Math.max(0,Math.min(1,(ts-w0)/Math.max(w1-w0,1)))*(W-L-R);
   let out = '';
   lanes.forEach((c,i)=>{
     const y = 18 + i*laneH + laneH/2;
     out += '<text x="4" y="'+(y+4)+'">'+c[1]+'</text>';
     out += '<line class="grid" x1="'+L+'" y1="'+y+'" x2="'+(W-R)+'" y2="'+y+'"/>';
   });
-  S.findings.forEach((f,idx)=>{
-    const li = lanes.findIndex(c=>c[0]===f.cat);
-    if (li<0) return;
+  // 레인별로 창 안의 탐지를 x 순 정렬 → 14px 이내로 붙으면 클러스터(개수 배지)로 묶는다
+  const clusters = [];
+  lanes.forEach((c,li)=>{
     const y = 18 + li*laneH + laneH/2;
-    const px = f.ts ? x(f.ts) : L+6;  // 시각 미상은 구간 시작에
-    out += '<circle data-i="'+idx+'" cx="'+px+'" cy="'+y+'" r="7" fill="'+SEVC[f.sev]+'"/>';
+    const items = S.findings.map((f,idx)=>({f,idx}))
+      .filter(o => o.f.cat===c[0] && (o.f.ts||w0) >= w0 - 1 && (o.f.ts||w0) <= w1 + 1)
+      .map(o => ({...o, px: o.f.ts ? x(o.f.ts) : L+6}))
+      .sort((a,b)=>a.px-b.px);
+    let cur = null;
+    items.forEach(o => {
+      if (cur && o.px - cur.px <= 14){ cur.members.push(o); cur.px = (cur.px0 + o.px)/2; }
+      else { cur = {px: o.px, px0: o.px, y, members:[o]}; clusters.push(cur); }
+    });
+  });
+  clusters.forEach((cl,ci)=>{
+    const sev = cl.members.reduce((m,o)=>SEVERITY_RANK(o.f.sev)>SEVERITY_RANK(m)?o.f.sev:m, 'info');
+    const n = cl.members.length;
+    const r = n>1 ? 10 : 7;
+    out += '<circle data-c="'+ci+'" cx="'+cl.px+'" cy="'+cl.y+'" r="'+r+'" fill="'+SEVC[sev]+'"/>';
+    if (n>1) out += '<text class="cnt" x="'+cl.px+'" y="'+(cl.y+3.5)+'" text-anchor="middle">'+n+'</text>';
   });
   svg.innerHTML = out;
   const t = s => new Date(s*1000).toISOString().substr(11,8);
-  $('tl-x').innerHTML = '<span style="margin-left:'+(L/ (W/100))+'%">'+t(t0)+'</span><span>'+t((t0+t1)/2)+'</span><span>'+t(t1)+'</span>';
+  $('tl-x').innerHTML = '<span style="margin-left:'+(L/(W/100))+'%">'+t(w0)+'</span><span>'+t((w0+w1)/2)+'</span><span>'+t(w1)+'</span>';
+  $('tl-range').textContent = t(w0)+' ~ '+t(w1)+(tlWin.a>0||tlWin.b<100?' (확대 중)':'');
   svg.querySelectorAll('circle').forEach(c => c.onclick = () => {
-    const f = S.findings[+c.dataset.i];
-    $('tl-detail').innerHTML =
-      '<div class="panel det-full">'+fBadge(f)+
-      '<span class="cat">'+(f.ts?new Date(f.ts*1000).toISOString().substr(11,8)+' UTC':'시각 미상')+'</span>'+
-      '<div style="font-weight:700;margin-top:6px">'+esc(f.title)+'</div>'+
-      '<div class="d">'+esc(f.desc)+'</div>'+
-      f.evidence.map(e=>'<div class="e">· '+esc(e)+'</div>').join('')+
-      (f.mitre && f.mitre!=='-' ? '<div class="m">MITRE ATT&CK: '+esc(f.mitre)+'</div>':'')+
-      (f.reco ? '<div class="r">대응: '+esc(f.reco)+'</div>':'')+'</div>';
+    const cl = clusters[+c.dataset.c];
+    $('tl-detail').innerHTML = cl.members.map(o=>fCard(o.f)).join('');
   });
 }
+function SEVERITY_RANK(s){ return {critical:4,high:3,medium:2,low:1,info:0}[s]||0; }
+$('tl-a').oninput = () => {
+  let a=+$('tl-a').value, b=+$('tl-b').value;
+  if (a >= b) { a = b - 5; $('tl-a').value = a; }
+  tlWin = {a, b}; renderTimelineTab();
+};
+$('tl-b').oninput = () => {
+  let a=+$('tl-a').value, b=+$('tl-b').value;
+  if (b <= a) { b = a + 5; $('tl-b').value = b; }
+  tlWin = {a, b}; renderTimelineTab();
+};
+$('tl-reset').onclick = () => {
+  tlWin = {a:0, b:100}; $('tl-a').value = 0; $('tl-b').value = 100; renderTimelineTab();
+};
 /* ---------- 증거 스트림 뷰어 (D10) ---------- */
 let evSel = null;
 const HILITE = /(PASS [^\r\n]*|USER [^\r\n]*|Authorization:[^\r\n]*|password=[^&\s]*|530 [^\r\n]*|230 [^\r\n]*|\$\{jndi:[^}]*\}?|<script[^>]*>|\(\)\s*\{\s*:;\s*\};|UNION[+ ]SELECT[^\r\n]*)/gi;
