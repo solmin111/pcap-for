@@ -55,7 +55,10 @@ python -m pcapfor samples/99_mixed.pcap --ioc iocs_example.txt \
 | ![overview](assets/screenshot_overview.png) | ![topology](assets/screenshot_topology.png) |
 
 - **Overview**: 요약 카드 · 트래픽 타임라인 · 프로토콜 분포 · Top talkers · 우측 실시간 탐지 피드(클릭 시 증거/MITRE/대응 펼침)
+- **Timeline**: 탐지기 레인별 공격 연대기 — 각 탐지의 최초 관찰 시각을 점으로 표시, 점 클릭 시 상세
 - **Topology**: 호스트 노드 그래프(자체 구현 force 레이아웃) — 내부/외부/탐지 연루 색 구분, 엣지 굵기=전송량, 노드 클릭 시 호스트 상세
+- **Evidence**: 탐지 연루 세션의 재조립 TCP 스트림 뷰어 — 평문 자격증명·공격 문자열 자동 하이라이트
+- **Board**: 심각도별 칸반 보드 — 트리아지(우선순위 분류)용, 카드 클릭 시 증거 펼침
 - **Sessions / Detections**: 정렬 가능한 세션 테이블(탐지 연루 하이라이트), 전체 탐지 상세
 
 실시간 모드와도 결합됩니다 — `--live --gui` 는 localhost 임시 포트에 같은 대시보드를

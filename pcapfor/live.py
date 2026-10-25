@@ -114,7 +114,7 @@ class LiveEngine:
                 msg = dnsparse.parse(pkt.payload)
                 if msg is not None and (msg.questions or msg.answers):
                     querier = pkt.dst if msg.is_response else pkt.src
-                    self.data.dns_messages.append((querier, msg))
+                    self.data.dns_messages.append((querier, msg, raw.ts))
 
     def sweep(self) -> list[Finding]:
         with self.lock:

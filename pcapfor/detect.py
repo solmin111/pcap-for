@@ -39,6 +39,7 @@ class Finding:
     mitre: str = ""                                 # MITRE ATT&CK 기법 ID
     recommendation: str = ""
     session_ids: list = field(default_factory=list)
+    ts: float = 0.0        # 탐지 근거가 처음 관찰된 시각 (epoch, 타임라인용)
 
     @property
     def rank(self) -> int:
@@ -73,9 +74,11 @@ def detect_port_scan(data) -> list[Finding]:
     out = []
     # src -> dst -> {미완성 연결의 dst 포트}
     probes = defaultdict(lambda: defaultdict(set))
+    first_ts = defaultdict(lambda: defaultdict(lambda: float("inf")))
     for s in data.sessions:
         if s.proto == "tcp" and s.syn_seen and not s.synack_seen and s.bytes_s2c == 0:
             probes[s.client][s.server].add(s.sport)
+            first_ts[s.client][s.server] = min(first_ts[s.client][s.server], s.first_ts)
     for src, by_dst in probes.items():
         for dst, ports in by_dst.items():
             if len(ports) >= THRESHOLDS["portscan_min_ports"]:
@@ -88,6 +91,7 @@ def detect_port_scan(data) -> list[Finding]:
                     evidence=[f"대상 포트 예시: {', '.join(map(str, sample))} ..."],
                     mitre="T1046 (Network Service Discovery)",
                     recommendation="해당 출발지 IP 차단 여부 검토, 스캔 이후 성공한 연결이 있는지 추적",
+                    ts=first_ts[src][dst],
                 ))
     return out
 
@@ -95,9 +99,11 @@ def detect_port_scan(data) -> list[Finding]:
 def detect_host_scan(data) -> list[Finding]:
     out = []
     sweep = defaultdict(lambda: defaultdict(set))  # src -> port -> {hosts}
+    first_ts = defaultdict(lambda: defaultdict(lambda: float("inf")))
     for s in data.sessions:
         if s.proto == "tcp" and s.syn_seen and not s.synack_seen:
             sweep[s.client][s.sport].add(s.server)
+            first_ts[s.client][s.sport] = min(first_ts[s.client][s.sport], s.first_ts)
     for src, by_port in sweep.items():
         for port, hosts in by_port.items():
             if len(hosts) >= THRESHOLDS["hostscan_min_hosts"]:
@@ -109,6 +115,7 @@ def detect_host_scan(data) -> list[Finding]:
                     evidence=[f"대상 호스트 예시: {', '.join(sorted(hosts)[:8])} ..."],
                     mitre="T1018 (Remote System Discovery)",
                     recommendation="출발지 호스트의 감염 여부 점검",
+                    ts=first_ts[src][port],
                 ))
     return out
 
@@ -119,10 +126,13 @@ def detect_bruteforce(data) -> list[Finding]:
     out = []
     # FTP: 530 응답 수 세기
     fail_by_attacker = defaultdict(int)
+    ftp_first = defaultdict(lambda: float("inf"))
     for sess, c2s, s2c in data.ftp_streams:
         fails = s2c.count(b"530")
         if fails:
             fail_by_attacker[(sess.client, sess.server)] += fails
+            ftp_first[(sess.client, sess.server)] = min(
+                ftp_first[(sess.client, sess.server)], sess.first_ts)
     for (src, dst), fails in fail_by_attacker.items():
         if fails >= THRESHOLDS["brute_min_attempts"]:
             out.append(Finding(
@@ -132,12 +142,16 @@ def detect_bruteforce(data) -> list[Finding]:
                 evidence=[f"실패 횟수: {fails}"],
                 mitre="T1110 (Brute Force)",
                 recommendation="해당 계정 잠금/비밀번호 변경, 출발지 차단",
+                ts=ftp_first[(src, dst)],
             ))
     # HTTP: 같은 URI에 401/403 반복
     auth_fail = defaultdict(int)
+    auth_first = defaultdict(lambda: float("inf"))
     for sess, tx in data.http_transactions:
         if tx.response and tx.response.status in (401, 403) and tx.request:
-            auth_fail[(sess.client, sess.server, tx.request.uri)] += 1
+            key = (sess.client, sess.server, tx.request.uri)
+            auth_fail[key] += 1
+            auth_first[key] = min(auth_first[key], sess.first_ts)
     for (src, dst, uri), n in auth_fail.items():
         if n >= THRESHOLDS["brute_min_attempts"]:
             out.append(Finding(
@@ -147,13 +161,17 @@ def detect_bruteforce(data) -> list[Finding]:
                 evidence=[f"경로: {uri}", f"실패 횟수: {n}"],
                 mitre="T1110.001 (Password Guessing)",
                 recommendation="계정 잠금 정책·레이트 리밋 적용 검토",
+                ts=auth_first[(src, dst, uri)],
             ))
     # SSH/Telnet/RDP: 같은 서비스로 짧은 연결 다수
     quick = defaultdict(int)
+    quick_first = defaultdict(lambda: float("inf"))
     for s in data.sessions:
         if s.proto == "tcp" and s.sport in (22, 23, 3389) and s.synack_seen:
             if s.duration < 10 and (s.fin_seen or s.rst_seen):
                 quick[(s.client, s.server, s.sport)] += 1
+                quick_first[(s.client, s.server, s.sport)] = min(
+                    quick_first[(s.client, s.server, s.sport)], s.first_ts)
     for (src, dst, port), n in quick.items():
         if n >= THRESHOLDS["brute_min_attempts"]:
             svc = {22: "SSH", 23: "Telnet", 3389: "RDP"}[port]
@@ -165,6 +183,7 @@ def detect_bruteforce(data) -> list[Finding]:
                 evidence=[f"짧은 연결 수: {n}"],
                 mitre="T1110 (Brute Force)",
                 recommendation="인증 로그와 대조하여 실패 로그인 확인",
+                ts=quick_first[(src, dst, port)],
             ))
     return out
 
@@ -188,7 +207,7 @@ def detect_cleartext_credentials(data) -> list[Finding]:
                 ],
                 mitre="T1040 (Network Sniffing)",
                 recommendation="FTPS/SFTP 전환, 노출된 비밀번호 즉시 변경",
-                session_ids=[sess.sid],
+                session_ids=[sess.sid], ts=sess.first_ts,
             ))
     seen_form = set()
     for sess, tx in data.http_transactions:
@@ -208,7 +227,7 @@ def detect_cleartext_credentials(data) -> list[Finding]:
                 evidence=[f"URI: {tx.request.uri}", f"사용자명: {user}"],
                 mitre="T1040 (Network Sniffing)",
                 recommendation="HTTPS 적용, 해당 계정 비밀번호 변경",
-                session_ids=[sess.sid],
+                session_ids=[sess.sid], ts=sess.first_ts,
             ))
         if tx.request.method == "POST" and tx.request.body:
             body = unquote_plus(tx.request.body.decode("latin-1", "replace"))
@@ -225,7 +244,7 @@ def detect_cleartext_credentials(data) -> list[Finding]:
                     evidence=[f"필드명: {m.group(1)}"],
                     mitre="T1040 (Network Sniffing)",
                     recommendation="HTTPS 적용",
-                    session_ids=[sess.sid],
+                    session_ids=[sess.sid], ts=sess.first_ts,
                 ))
     return out
 
@@ -277,7 +296,7 @@ def detect_web_attacks(data) -> list[Finding]:
                                   f"응답 상태: {tx.response.status if tx.response else '(없음)'}"],
                         mitre=f"{mitre} (Exploit Public-Facing Application)",
                         recommendation="WAF 룰 점검, 해당 엔드포인트 입력 검증 확인, 응답 코드로 성공 여부 판단",
-                        session_ids=[sess.sid],
+                        session_ids=[sess.sid], ts=sess.first_ts,
                     ))
                     break
     return out
@@ -295,17 +314,21 @@ def detect_dns_tunneling(data) -> list[Finding]:
     by_domain = defaultdict(list)  # 등록 도메인 -> [(질의 호스트, 풀 쿼리네임)]
     txt_count = Counter()
     nx_by_host = defaultdict(set)  # 질의 호스트 -> {NXDOMAIN 난 등록 도메인}
-    for src, msg in data.dns_messages:
+    dom_first = defaultdict(lambda: float("inf"))
+    nx_first = defaultdict(lambda: float("inf"))
+    for src, msg, mts in data.dns_messages:
         for qname, qtype in msg.questions:
             if not qname or "." not in qname:
                 continue
             dom = _registered_domain(qname)
             if not msg.is_response:
                 by_domain[dom].append((src, qname))
+                dom_first[dom] = min(dom_first[dom], mts)
                 if qtype == "TXT":
                     txt_count[dom] += 1
             elif msg.rcode == 3:
                 nx_by_host[src].add(dom)  # src = 질의를 보냈던 호스트 (analyzer가 보정)
+                nx_first[src] = min(nx_first[src], mts)
     for dom, queries in by_domain.items():
         if len(queries) < THRESHOLDS["dns_min_queries"]:
             continue
@@ -337,6 +360,7 @@ def detect_dns_tunneling(data) -> list[Finding]:
                           f"TXT 질의 비율: {txt_count[dom]}/{len(queries)}"],
                 mitre="T1071.004 (DNS), T1048 (Exfiltration)",
                 recommendation="해당 도메인 차단 및 질의 호스트 격리, DNS 로그로 유출량 추정",
+                ts=dom_first[dom],
             ))
     for host, failed_doms in nx_by_host.items():
         if len(failed_doms) >= THRESHOLDS["dns_min_queries"]:
@@ -353,6 +377,7 @@ def detect_dns_tunneling(data) -> list[Finding]:
                               f"평균 엔트로피: {avg_ent:.2f}"],
                     mitre="T1568.002 (Domain Generation Algorithms)",
                     recommendation="질의 호스트의 프로세스/작업 스케줄러 점검",
+                    ts=nx_first[host],
                 ))
     return out
 
@@ -383,6 +408,7 @@ def detect_beaconing(data) -> list[Finding]:
                 evidence=[f"연결 횟수: {len(times)}", f"평균 간격: {mean:.2f}s", f"CV: {cv:.3f}"],
                 mitre="T1071 (Application Layer Protocol), T1573 (Encrypted Channel)",
                 recommendation=f"{dst} 평판 조회, 출발 호스트 메모리/자동실행 항목 점검",
+                ts=times[0],
             ))
     return out
 
@@ -393,10 +419,12 @@ def detect_arp_spoofing(data) -> list[Finding]:
     out = []
     claims = defaultdict(set)  # IP -> {MAC}
     reply_count = Counter()
-    for pkt_arp in data.arp_records:
+    ip_first = defaultdict(lambda: float("inf"))
+    for ats, pkt_arp in data.arp_records:
         if pkt_arp.op == 2:  # reply
             claims[pkt_arp.sender_ip].add(pkt_arp.sender_mac)
             reply_count[(pkt_arp.sender_ip, pkt_arp.sender_mac)] += 1
+            ip_first[pkt_arp.sender_ip] = min(ip_first[pkt_arp.sender_ip], ats)
     for ip, macs in claims.items():
         if len(macs) > 1:
             detail = ", ".join(f"{m}({reply_count[(ip, m)]}회)" for m in sorted(macs))
@@ -408,6 +436,7 @@ def detect_arp_spoofing(data) -> list[Finding]:
                 evidence=[f"{ip} <- {detail}"],
                 mitre="T1557.002 (ARP Cache Poisoning)",
                 recommendation="정적 ARP/DAI(Dynamic ARP Inspection) 적용, 해당 구간 트래픽 전수 조사",
+                ts=ip_first[ip],
             ))
     return out
 
@@ -454,10 +483,10 @@ def detect_ioc(data, path: str) -> list[Finding]:
                     evidence=[f"세션 수 집계 필요: '{peer}' 로 필터링"],
                     mitre="-",
                     recommendation="해당 IP와 통신한 모든 호스트 격리·점검",
-                    session_ids=[s.sid],
+                    session_ids=[s.sid], ts=s.first_ts,
                 ))
     hit_doms = set()
-    for _, msg in data.dns_messages:
+    for _, msg, mts in data.dns_messages:
         for qname, _ in msg.questions:
             q = qname.lower().rstrip(".")
             for d in domains:
@@ -469,5 +498,6 @@ def detect_ioc(data, path: str) -> list[Finding]:
                         f"침해지표 도메인 '{d}' 에 대한 DNS 질의가 관찰되었습니다.",
                         mitre="-",
                         recommendation="질의 호스트 격리, DNS 싱크홀 적용",
+                        ts=mts,
                     ))
     return out

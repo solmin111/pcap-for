@@ -61,6 +61,22 @@ class TestPayload(unittest.TestCase):
         sess = self.payload["sessions"]
         self.assertTrue(sess[0]["flagged"])  # 탐지 연루 세션이 상단
 
+    def test_streams_for_evidence_viewer(self):
+        streams = self.payload["streams"]
+        self.assertTrue(streams)
+        for k in ("sid", "client", "server", "c2s", "s2c", "bytes"):
+            self.assertIn(k, streams[0])
+        # FTP 성공 세션 스트림엔 평문 자격증명이 보여야 한다
+        joined = " ".join(s["c2s"] for s in streams)
+        self.assertIn("PASS", joined)
+
+    def test_finding_timestamps(self):
+        ts_list = [f["ts"] for f in self.payload["findings"]]
+        self.assertTrue(all(isinstance(t, (int, float)) for t in ts_list))
+        # 대부분의 탐지는 발생 시각이 있어야 한다 (타임라인용)
+        self.assertGreater(sum(1 for t in ts_list if t > 0), len(ts_list) * 0.7)
+        json.dumps(self.payload)  # Infinity 가 섞이면 invalid JSON
+
 
 class TestRender(unittest.TestCase):
     def test_static_html(self):

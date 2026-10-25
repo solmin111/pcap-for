@@ -24,8 +24,8 @@ class AnalysisData:
     sessions: list = field(default_factory=list)
     http_transactions: list = field(default_factory=list)  # [(Session, HttpTransaction)]
     ftp_streams: list = field(default_factory=list)        # [(Session, c2s, s2c)]
-    dns_messages: list = field(default_factory=list)       # [(질의 호스트 IP, DnsMessage)]
-    arp_records: list = field(default_factory=list)        # [Arp]
+    dns_messages: list = field(default_factory=list)       # [(질의 호스트 IP, DnsMessage, ts)]
+    arp_records: list = field(default_factory=list)        # [(ts, Arp)]
 
 
 @dataclass
@@ -86,7 +86,7 @@ def analyze(path: str, ioc_path: str | None = None) -> AnalysisResult:
 
         if pkt.arp:
             result.protocol_counts["arp"] += 1
-            data.arp_records.append(pkt.arp)
+            data.arp_records.append((pkt.ts, pkt.arp))
             continue
         if not pkt.src:
             result.protocol_counts["l2-other"] += 1
@@ -101,7 +101,7 @@ def analyze(path: str, ioc_path: str | None = None) -> AnalysisResult:
             msg = dnsparse.parse(pkt.payload)
             if msg is not None and (msg.questions or msg.answers):
                 querier = pkt.dst if msg.is_response else pkt.src
-                data.dns_messages.append((querier, msg))
+                data.dns_messages.append((querier, msg, pkt.ts))
 
     data.sessions = table.sessions
     result.top_talkers = talkers.most_common(10)

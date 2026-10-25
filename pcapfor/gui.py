@@ -133,7 +133,42 @@ def _findings_payload(findings):
         "sev": f.severity, "cat": f.category, "title": f.title,
         "desc": f.description, "evidence": list(f.evidence),
         "mitre": f.mitre, "reco": f.recommendation, "sids": list(f.session_ids),
+        # inf/0 은 "시각 미상" — JSON 표준엔 Infinity 가 없으므로 0 으로 정규화
+        "ts": f.ts if math.isfinite(f.ts) and f.ts > 0 else 0,
     } for f in findings]
+
+
+MAX_STREAM_SESSIONS = 12
+MAX_STREAM_CHARS = 4000
+
+
+def _printable(data: bytes) -> str:
+    text = data.decode("latin-1", "replace")
+    return "".join(ch if (32 <= ord(ch) < 127) or ch in "\r\n\t" else "." for ch in text)
+
+
+def _streams_payload(sessions, flagged_sids):
+    """탐지 연루 TCP 세션의 재조립 스트림 미리보기 (증거 뷰어용)."""
+    out = []
+    for s in sessions:
+        if s.sid not in flagged_sids or s.proto != "tcp":
+            continue
+        c2s = s.stream(c2s=True)
+        s2c = s.stream(c2s=False)
+        if not c2s and not s2c:
+            continue
+        out.append({
+            "sid": s.sid,
+            "client": f"{s.client}:{s.cport}", "server": f"{s.server}:{s.sport}",
+            "bytes": s.bytes_c2s + s.bytes_s2c, "first": _fmt_ts(s.first_ts),
+            "c2s": _printable(c2s[:MAX_STREAM_CHARS]),
+            "s2c": _printable(s2c[:MAX_STREAM_CHARS]),
+            "c2s_more": len(c2s) > MAX_STREAM_CHARS,
+            "s2c_more": len(s2c) > MAX_STREAM_CHARS,
+        })
+        if len(out) >= MAX_STREAM_SESSIONS:
+            break
+    return out
 
 
 def _common_payload(mode, meta, timeline, protocol_counts, sessions, findings):
@@ -158,6 +193,7 @@ def _common_payload(mode, meta, timeline, protocol_counts, sessions, findings):
         "findings": _findings_payload(findings),
         "sessions": _sessions_payload(sessions, flagged, flagged_sids),
         "graph": _graph_payload(sessions, flagged, flagged_sids),
+        "streams": _streams_payload(sessions, flagged_sids),
     }
 
 

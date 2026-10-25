@@ -93,6 +93,38 @@ table.list tr.fl td{background:#241a1a}
 .det-full .m{color:#b39ddb;font-size:11.5px;margin-top:4px}
 .det-full .r{color:#90caf9;font-size:11.5px;margin-top:2px}
 .det-full .e{color:#a8b6c8;font-size:11.5px;font-family:Consolas,monospace}
+/* ---------- 타임라인 ---------- */
+#tl-svg{width:100%;height:340px;display:block}
+#tl-svg text{fill:var(--muted);font-size:10.5px}
+#tl-svg line.grid{stroke:#232c3a}
+#tl-svg circle{cursor:pointer;stroke:rgba(0,0,0,.4);stroke-width:1}
+/* ---------- 증거 뷰어 ---------- */
+.ev-wrap{display:grid;grid-template-columns:270px 1fr;gap:14px;align-items:start}
+.ev-item{border:1px solid var(--border);border-left:3px solid var(--high);background:var(--panel2);
+ border-radius:7px;padding:8px 10px;margin-bottom:8px;cursor:pointer;font-family:Consolas,monospace;font-size:11px}
+.ev-item.sel{border-color:var(--accent);border-left-color:var(--accent)}
+.ev-item .m{color:var(--muted);font-family:'Malgun Gothic';font-size:10.5px;margin-top:2px}
+.stream{background:#0d1117;border:1px solid var(--border);border-radius:6px;padding:8px 11px;
+ font-family:Consolas,monospace;font-size:11px;line-height:1.55;white-space:pre-wrap;word-break:break-all;
+ max-height:300px;overflow-y:auto;margin:4px 0 10px}
+.stream.c2s{border-left:3px solid var(--accent)}
+.stream.s2c{border-left:3px solid #26a69a}
+.stream mark{background:#5c2a2e;color:#ffb3af;border-radius:2px;padding:0 2px}
+.dirlab{font-size:11px;color:var(--muted);margin-top:6px}
+/* ---------- 칸반 보드 ---------- */
+.board{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;align-items:start}
+.bcol{background:#151a22;border:1px solid var(--border);border-radius:10px;padding:10px;min-width:0}
+.bcol .bh{font-size:12px;font-weight:700;margin-bottom:8px;display:flex;justify-content:space-between}
+.bcol .bh .n{color:var(--muted);font-weight:400}
+.bcard{background:var(--panel);border:1px solid var(--border);border-radius:7px;padding:9px 11px;
+ margin-bottom:8px;cursor:pointer;border-top:3px solid var(--muted)}
+.bcard.sev-critical{border-top-color:var(--crit)} .bcard.sev-high{border-top-color:var(--high)}
+.bcard.sev-medium{border-top-color:var(--med)} .bcard.sev-low{border-top-color:var(--low)}
+.bcard.sev-info{border-top-color:var(--info)}
+.bcard .t{font-weight:700;font-size:12px;margin-bottom:3px;word-break:break-all}
+.bcard .d{color:var(--muted);font-size:11px;line-height:1.5;word-break:break-all}
+.bcard .ev{display:none;margin-top:6px;border-top:1px dashed var(--border);padding-top:6px;font-size:10.5px;color:#a8b6c8}
+.bcard.open .ev{display:block}
 @media(max-width:1100px){#app{grid-template-columns:170px 1fr}#feed{display:none}}
 </style>
 </head>
@@ -115,7 +147,10 @@ table.list tr.fl td{background:#241a1a}
   <div class="brand-sub" id="side-mode">network forensics</div>
   <nav id="nav">
     <a data-tab="overview" class="on">Overview</a>
+    <a data-tab="timeline">Timeline</a>
     <a data-tab="topology">Topology</a>
+    <a data-tab="evidence">Evidence</a>
+    <a data-tab="board">Board</a>
     <a data-tab="sessions">Sessions</a>
     <a data-tab="detections">Detections</a>
   </nav>
@@ -157,6 +192,24 @@ table.list tr.fl td{background:#241a1a}
     </div>
   </section>
 
+  <section id="tab-timeline" class="tab hidden">
+    <div class="panel"><div class="ptitle">Attack chronology — 탐지기 레인별 발생 시각 (점 클릭 = 상세)</div>
+      <svg id="tl-svg"></svg>
+      <div class="axis" id="tl-x"></div></div>
+    <div id="tl-detail"></div>
+  </section>
+
+  <section id="tab-evidence" class="tab hidden">
+    <div class="ev-wrap">
+      <div class="panel" id="ev-list-panel"><div class="ptitle">탐지 연루 세션</div><div id="ev-list"></div></div>
+      <div class="panel" id="ev-view"><div class="muted">왼쪽에서 세션을 선택하면 재조립된 TCP 스트림이 표시됩니다.</div></div>
+    </div>
+  </section>
+
+  <section id="tab-board" class="tab hidden">
+    <div class="board" id="board-cols"></div>
+  </section>
+
   <section id="tab-sessions" class="tab hidden">
     <div class="panel"><div class="ptitle" id="sess-title">Sessions</div>
       <table class="list" id="sess-table"><thead><tr>
@@ -190,6 +243,7 @@ function showTab(name){
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.tab===name));
   const el = $('tab-'+name); if (el) el.classList.remove('hidden');
   if (name==='topology') renderTopo();
+  if (name==='timeline') renderTimelineTab();
   history.replaceState(null,'','#'+name);
 }
 document.querySelectorAll('#nav a').forEach(a => a.onclick = () => showTab(a.dataset.tab));
@@ -351,15 +405,107 @@ function renderTopoPanel(){
     (sess.length?'<div class="ptitle" style="margin-top:10px">세션</div><table>'+
       sess.map(s=>'<tr><td>'+esc(s.client)+' → '+esc(s.server)+':'+s.sport+'</td><td>'+s.proto+' · '+fmtB(s.bytes)+'</td></tr>').join('')+'</table>':'');
 }
+/* ---------- 탐지 타임라인 (D04) ---------- */
+const CATS = [['recon','정찰'],['bruteforce','계정 공격'],['credential','자격증명'],
+              ['webattack','웹 공격'],['c2','C2/유출'],['spoofing','스푸핑'],['ioc','IOC']];
+const SEVC = {critical:'var(--crit)', high:'var(--high)', medium:'var(--med)',
+              low:'var(--low)', info:'var(--info)'};
+function renderTimelineTab(){
+  const svg = $('tl-svg'), W = svg.clientWidth||900, H = 340, L = 92, R = 20;
+  svg.setAttribute('viewBox','0 0 '+W+' '+H);
+  const tl = S.timeline;
+  const t0 = tl.t0, t1 = tl.t0 + Math.max(tl.bins.length,1)*tl.dt;
+  const lanes = CATS.filter(c => S.findings.some(f=>f.cat===c[0]));
+  if (!lanes.length){ svg.innerHTML='<text x="20" y="30">탐지가 없어 타임라인이 비어 있습니다.</text>'; $('tl-x').innerHTML=''; return; }
+  const laneH = Math.min(44, (H-30)/lanes.length);
+  const x = ts => L + Math.max(0,Math.min(1,(ts-t0)/Math.max(t1-t0,1)))*(W-L-R);
+  let out = '';
+  lanes.forEach((c,i)=>{
+    const y = 18 + i*laneH + laneH/2;
+    out += '<text x="4" y="'+(y+4)+'">'+c[1]+'</text>';
+    out += '<line class="grid" x1="'+L+'" y1="'+y+'" x2="'+(W-R)+'" y2="'+y+'"/>';
+  });
+  S.findings.forEach((f,idx)=>{
+    const li = lanes.findIndex(c=>c[0]===f.cat);
+    if (li<0) return;
+    const y = 18 + li*laneH + laneH/2;
+    const px = f.ts ? x(f.ts) : L+6;  // 시각 미상은 구간 시작에
+    out += '<circle data-i="'+idx+'" cx="'+px+'" cy="'+y+'" r="7" fill="'+SEVC[f.sev]+'"/>';
+  });
+  svg.innerHTML = out;
+  const t = s => new Date(s*1000).toISOString().substr(11,8);
+  $('tl-x').innerHTML = '<span style="margin-left:'+(L/ (W/100))+'%">'+t(t0)+'</span><span>'+t((t0+t1)/2)+'</span><span>'+t(t1)+'</span>';
+  svg.querySelectorAll('circle').forEach(c => c.onclick = () => {
+    const f = S.findings[+c.dataset.i];
+    $('tl-detail').innerHTML =
+      '<div class="panel det-full">'+fBadge(f)+
+      '<span class="cat">'+(f.ts?new Date(f.ts*1000).toISOString().substr(11,8)+' UTC':'시각 미상')+'</span>'+
+      '<div style="font-weight:700;margin-top:6px">'+esc(f.title)+'</div>'+
+      '<div class="d">'+esc(f.desc)+'</div>'+
+      f.evidence.map(e=>'<div class="e">· '+esc(e)+'</div>').join('')+
+      (f.mitre && f.mitre!=='-' ? '<div class="m">MITRE ATT&CK: '+esc(f.mitre)+'</div>':'')+
+      (f.reco ? '<div class="r">대응: '+esc(f.reco)+'</div>':'')+'</div>';
+  });
+}
+/* ---------- 증거 스트림 뷰어 (D10) ---------- */
+let evSel = null;
+const HILITE = /(PASS [^\r\n]*|USER [^\r\n]*|Authorization:[^\r\n]*|password=[^&\s]*|530 [^\r\n]*|230 [^\r\n]*|\$\{jndi:[^}]*\}?|<script[^>]*>|\(\)\s*\{\s*:;\s*\};|UNION[+ ]SELECT[^\r\n]*)/gi;
+function hilite(text){
+  return esc(text).replace(HILITE, m => '<mark>'+m+'</mark>');
+}
+function renderEvidence(){
+  const list = $('ev-list');
+  if (!S.streams.length){
+    list.innerHTML = '<div class="muted" style="font-size:12px">탐지에 연루된 세션 스트림이 없습니다.</div>';
+    $('ev-view').innerHTML = '<div class="muted">표시할 증거 스트림이 없습니다.</div>';
+    return;
+  }
+  list.innerHTML = S.streams.map(st =>
+    '<div class="ev-item'+(evSel===st.sid?' sel':'')+'" data-sid="'+st.sid+'">'+
+    esc(st.client)+' → '+esc(st.server)+
+    '<div class="m">세션 #'+st.sid+' · '+fmtB(st.bytes)+' · '+st.first+'</div></div>').join('');
+  list.querySelectorAll('.ev-item').forEach(el => el.onclick = () => {
+    evSel = +el.dataset.sid; renderEvidence();
+  });
+  const st = S.streams.find(s=>s.sid===evSel) || S.streams[0];
+  if (!st) return;
+  const rel = S.findings.filter(f=>f.sids.includes(st.sid));
+  $('ev-view').innerHTML =
+    '<div class="ptitle">세션 #'+st.sid+' — '+esc(st.client)+' ⇄ '+esc(st.server)+'</div>'+
+    rel.map(f=>'<span class="badge b-'+f.sev+'">'+SEVK[f.sev].toUpperCase()+'</span> <b style="font-size:12px">'+esc(f.title)+'</b><br>').join('')+
+    '<div class="dirlab">클라이언트 → 서버'+(st.c2s_more?' (앞 4KB)':'')+'</div>'+
+    '<div class="stream c2s">'+(st.c2s?hilite(st.c2s):'(데이터 없음)')+'</div>'+
+    '<div class="dirlab">서버 → 클라이언트'+(st.s2c_more?' (앞 4KB)':'')+'</div>'+
+    '<div class="stream s2c">'+(st.s2c?hilite(st.s2c):'(데이터 없음)')+'</div>';
+}
+/* ---------- 칸반 보드 (D06) ---------- */
+function renderBoard(){
+  const cols = [['critical','심각'],['high','높음'],['medium','중간'],['low','낮음·정보']];
+  $('board-cols').innerHTML = cols.map(c => {
+    const items = S.findings.filter(f => c[0]==='low' ? (f.sev==='low'||f.sev==='info') : f.sev===c[0]);
+    return '<div class="bcol"><div class="bh"><span>'+c[1]+'</span><span class="n">'+items.length+'</span></div>'+
+      items.map(f=>{
+        const idx = S.findings.indexOf(f);
+        return '<div class="bcard sev-'+f.sev+'" data-i="'+idx+'">'+
+          '<div class="t">'+esc(f.title)+'</div><div class="d">'+esc(f.desc)+'</div>'+
+          '<div class="ev">'+f.evidence.map(e=>'<div>· '+esc(e)+'</div>').join('')+
+          (f.mitre&&f.mitre!=='-'?'<div style="color:#b39ddb">MITRE: '+esc(f.mitre)+'</div>':'')+
+          (f.reco?'<div style="color:#90caf9">대응: '+esc(f.reco)+'</div>':'')+'</div></div>';
+      }).join('')+'</div>';
+  }).join('');
+  document.querySelectorAll('.bcard').forEach(el => el.onclick = () => el.classList.toggle('open'));
+}
 /* ---------- 전체 렌더 + 라이브 폴링 ---------- */
 function renderAll(){
   renderHeader(); renderCards(); renderChart();
   bars($('protos'), S.protocols); bars($('talkers'), S.talkers, true);
-  renderFeed(); renderDetTab(); renderSessions();
+  renderFeed(); renderDetTab(); renderSessions(); renderEvidence(); renderBoard();
   if (!$('tab-topology').classList.contains('hidden')) { renderTopo(); if(selectedIp) renderTopoPanel(); }
+  if (!$('tab-timeline').classList.contains('hidden')) renderTimelineTab();
 }
 renderAll();
-showTab((location.hash||'#overview').slice(1) in {overview:1,topology:1,sessions:1,detections:1}
+const TABS = {overview:1,timeline:1,topology:1,evidence:1,board:1,sessions:1,detections:1};
+showTab((location.hash||'#overview').slice(1) in TABS
         ? (location.hash||'#overview').slice(1) : 'overview');
 
 if (S.mode === 'live'){
