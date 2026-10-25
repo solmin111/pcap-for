@@ -48,6 +48,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
+    # 한국어 콘솔(cp949)에 없는 문자가 출력에 섞여도 죽지 않게 한다.
+    # (cp949 콘솔에선 em-dash 등이 '?' 로 대체되어 표시된다)
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, OSError):
+            pass
     args = build_parser().parse_args(argv)
 
     if args.live:

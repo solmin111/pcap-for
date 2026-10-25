@@ -46,7 +46,7 @@ def default_iface_ip() -> str:
 
 def _print_finding(f: Finding) -> None:
     stamp = time.strftime("%H:%M:%S")
-    print(f"\n[{stamp}] ⚠ ({SEV_KO[f.severity]}/{f.category}) {f.title}")
+    print(f"\n[{stamp}] [!] ({SEV_KO[f.severity]}/{f.category}) {f.title}")
     print(f"           {f.description}")
     for ev in f.evidence[:3]:
         print(f"           증거: {ev}")
@@ -149,8 +149,8 @@ class LiveEngine:
 
 def run_live(duration: float, sweep_sec: float, ioc_path: str | None,
              save_path: str | None, gui: bool = False) -> int:
-    print("pcap-for — 실시간 탐지")
-    print("⚠ 본인 소유/관리 호스트의 트래픽 모니터링 용도로만 사용하세요.\n")
+    print("pcap-for :: 실시간 탐지")
+    print("[주의] 본인 소유/관리 호스트의 트래픽 모니터링 용도로만 사용하세요.\n")
     if not is_elevated():
         print("오류: 실시간 모드는 관리자 권한 세션이 필요합니다.")
         print("터미널을 '관리자 권한으로 실행'으로 연 뒤 다시 실행하세요.")
@@ -189,16 +189,16 @@ def run_live(duration: float, sweep_sec: float, ioc_path: str | None,
                     print(f"  … 패킷 {engine.packet_count:,} / 세션 {len(engine.table.sessions)}",
                           end="\r")
         except KeyboardInterrupt:
-            print("\n중단됨 — 최종 스윕 실행")
+            print("\n중단됨 - 최종 스윕 실행")
         for f in engine.sweep():
             _print_finding(f)
         if writer:
             writer.close()
-            print(f"\n증거 pcap 저장: {save_path} ({writer.count:,} packets) — "
+            print(f"\n증거 pcap 저장: {save_path} ({writer.count:,} packets) - "
                   f"파일 모드로 재분석 가능")
     if server is not None:
         server.shutdown()
 
     n = len(engine._seen)
-    print(f"\n종료 — 누적 탐지 {n}건")
+    print(f"\n종료 - 누적 탐지 {n}건")
     return 2 if n else 0
