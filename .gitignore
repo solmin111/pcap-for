@@ -7,3 +7,7 @@ sessions.csv
 *.pcapng
 gui_preview.html
 pcapfor_gui.html
+evidence_live.pcap
+live_log.txt
+run_live_test.ps1
+live_evidence_gui.html
