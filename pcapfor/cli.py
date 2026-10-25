@@ -1,10 +1,10 @@
-"""live_pcap_forensics_analyzer CLI.
+"""pcapfor CLI.
 
 사용 예:
-    python -m live_pcap_forensics_analyzer capture.pcap                  # 파일 분석
-    python -m live_pcap_forensics_analyzer capture.pcap --ioc iocs.txt --html report.html -v
-    python -m live_pcap_forensics_analyzer --live                        # 실시간 탐지 (관리자 필요)
-    python -m live_pcap_forensics_analyzer --live --save evidence.pcap   # 캡처 증거 저장
+    python -m pcapfor capture.pcap                  # 파일 분석
+    python -m pcapfor capture.pcap --ioc iocs.txt --html report.html -v
+    python -m pcapfor --live                        # 실시간 탐지 (관리자 필요)
+    python -m pcapfor --live --save evidence.pcap   # 캡처 증거 저장
 
 종료 코드: 0=이상 없음, 1=오류, 2=high/critical 탐지 존재 (배치 자동화용)
 """
@@ -21,7 +21,7 @@ from . import report
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="live-pcap_forensics_analyzer",
+        prog="pcap-for",
         description="PCAP/PCAPNG 네트워크 포렌식 분석기 (표준 라이브러리만 사용)",
     )
     p.add_argument("pcap", nargs="?", help="분석할 .pcap / .pcapng 파일 (--live 사용 시 생략)")
@@ -30,6 +30,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", metavar="FILE", help="JSON 결과 저장 경로")
     p.add_argument("--csv", metavar="FILE", help="세션 목록 CSV 저장 경로")
     p.add_argument("-v", "--verbose", action="store_true", help="증거/MITRE/대응까지 출력")
+    p.add_argument("--gui", nargs="?", const="pcapfor_gui.html", metavar="FILE",
+                   help="GUI 대시보드 — 파일 모드: 단일 HTML 생성 후 브라우저 오픈"
+                        " (기본 pcapfor_gui.html), --live 와 함께: 라이브 GUI 서버")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
     g = p.add_argument_group("실시간 탐지 (본인 소유/관리 호스트 전용)")
@@ -49,7 +52,8 @@ def main(argv=None) -> int:
 
     if args.live:
         from .live import run_live
-        return run_live(args.duration, args.sweep, args.ioc, args.save)
+        return run_live(args.duration, args.sweep, args.ioc, args.save,
+                        gui=args.gui is not None)
     if not args.pcap:
         build_parser().print_usage(sys.stderr)
         print("오류: pcap 파일을 지정하거나 --live 를 사용하세요", file=sys.stderr)
@@ -73,6 +77,13 @@ def main(argv=None) -> int:
     if args.csv:
         report.to_csv(result, args.csv)
         print(f"CSV 저장: {args.csv}")
+    if args.gui:
+        import os
+        import webbrowser
+        from .gui import render_static
+        render_static(result, args.gui)
+        print(f"GUI 대시보드 저장: {args.gui} (브라우저로 엽니다)")
+        webbrowser.open("file:///" + os.path.abspath(args.gui).replace("\\", "/"))
 
     if any(f.severity in ("high", "critical") for f in result.findings):
         return 2

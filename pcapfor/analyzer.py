@@ -38,6 +38,7 @@ class AnalysisResult:
     first_ts: float = 0.0
     last_ts: float = 0.0
     protocol_counts: Counter = field(default_factory=Counter)
+    timeline: Counter = field(default_factory=Counter)  # int(ts) -> 패킷 수 (GUI 차트용)
     top_talkers: list = field(default_factory=list)   # [(ip, packets)]
     data: AnalysisData = field(default_factory=AnalysisData)
     findings: list = field(default_factory=list)
@@ -81,6 +82,7 @@ def analyze(path: str, ioc_path: str | None = None) -> AnalysisResult:
         if result.first_ts == 0.0:
             result.first_ts = pkt.ts
         result.last_ts = max(result.last_ts, pkt.ts)
+        result.timeline[int(pkt.ts)] += 1
 
         if pkt.arp:
             result.protocol_counts["arp"] += 1

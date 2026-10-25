@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import ctypes
 import socket
+import threading
 import time
+from collections import Counter
 
 from . import detect, dnsparse, httpparse
 from .detect import Finding
@@ -92,21 +94,33 @@ class LiveEngine:
         self.table = SessionTable()
         self.ioc_path = ioc_path
         self.packet_count = 0
+        self.byte_count = 0
+        self.timeline: Counter = Counter()   # int(ts) -> 패킷 수
+        self.started_at = time.time()
+        self.findings: list[Finding] = []    # 지금까지 보고된 탐지(누적)
+        self.lock = threading.Lock()         # GUI 서버 스레드와 공유 보호
         self._seen: set[tuple[str, str]] = set()
 
     def ingest(self, raw: RawPacket) -> None:
         pkt = decode(raw)
         if pkt is None or not pkt.src:
             return
-        self.packet_count += 1
-        self.table.feed(pkt)
-        if pkt.proto == "udp" and 53 in (pkt.sport, pkt.dport) and pkt.payload:
-            msg = dnsparse.parse(pkt.payload)
-            if msg is not None and (msg.questions or msg.answers):
-                querier = pkt.dst if msg.is_response else pkt.src
-                self.data.dns_messages.append((querier, msg))
+        with self.lock:
+            self.packet_count += 1
+            self.byte_count += raw.orig_len
+            self.timeline[int(raw.ts)] += 1
+            self.table.feed(pkt)
+            if pkt.proto == "udp" and 53 in (pkt.sport, pkt.dport) and pkt.payload:
+                msg = dnsparse.parse(pkt.payload)
+                if msg is not None and (msg.questions or msg.answers):
+                    querier = pkt.dst if msg.is_response else pkt.src
+                    self.data.dns_messages.append((querier, msg))
 
     def sweep(self) -> list[Finding]:
+        with self.lock:
+            return self._sweep_locked()
+
+    def _sweep_locked(self) -> list[Finding]:
         # 세션에서 HTTP/FTP 추출을 다시 계산 (라이브 중엔 스트림이 계속 자란다)
         self.data.sessions = self.table.sessions
         self.data.http_transactions = []
@@ -129,12 +143,13 @@ class LiveEngine:
             if key not in self._seen:
                 self._seen.add(key)
                 fresh.append(f)
+                self.findings.append(f)
         return fresh
 
 
 def run_live(duration: float, sweep_sec: float, ioc_path: str | None,
-             save_path: str | None) -> int:
-    print("live-pcap_forensics_analyzer — 실시간 탐지")
+             save_path: str | None, gui: bool = False) -> int:
+    print("pcap-for — 실시간 탐지")
     print("⚠ 본인 소유/관리 호스트의 트래픽 모니터링 용도로만 사용하세요.\n")
     if not is_elevated():
         print("오류: 실시간 모드는 관리자 권한 세션이 필요합니다.")
@@ -143,9 +158,16 @@ def run_live(duration: float, sweep_sec: float, ioc_path: str | None,
 
     engine = LiveEngine(ioc_path)
     writer = PcapWriter(save_path, LINKTYPE_RAW_IP) if save_path else None
+    server = None
     with PacketCapture() as cap:
         print(f"{cap.iface_ip} 인터페이스 감시 시작 "
               f"(탐지 스윕 {sweep_sec:.0f}초 주기, Ctrl+C 종료)")
+        if gui:
+            import webbrowser
+            from .gui import start_live_server
+            server, url = start_live_server(engine, cap.iface_ip)
+            print(f"라이브 GUI: {url}")
+            webbrowser.open(url)
         start = last_sweep = time.time()
         number = 0
         try:
@@ -174,6 +196,8 @@ def run_live(duration: float, sweep_sec: float, ioc_path: str | None,
             writer.close()
             print(f"\n증거 pcap 저장: {save_path} ({writer.count:,} packets) — "
                   f"파일 모드로 재분석 가능")
+    if server is not None:
+        server.shutdown()
 
     n = len(engine._seen)
     print(f"\n종료 — 누적 탐지 {n}건")

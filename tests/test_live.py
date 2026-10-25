@@ -9,9 +9,9 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from live_pcap_forensics_analyzer import craft
-from live_pcap_forensics_analyzer.live import LiveEngine
-from live_pcap_forensics_analyzer.pcapio import LINKTYPE_RAW_IP, RawPacket
+from pcapfor import craft
+from pcapfor.live import LiveEngine
+from pcapfor.pcapio import LINKTYPE_RAW_IP, RawPacket
 
 
 class TestLiveEngine(unittest.TestCase):

@@ -7,8 +7,8 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from live_pcap_forensics_analyzer.analyzer import analyze
-from live_pcap_forensics_analyzer.pcapio import write_pcap
+from pcapfor.analyzer import analyze
+from pcapfor.pcapio import write_pcap
 
 # tools/make_samples.py 를 모듈로 로드해 시나리오 생성 함수를 재사용한다
 _spec = importlib.util.spec_from_file_location(

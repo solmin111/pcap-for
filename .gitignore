@@ -5,3 +5,5 @@ report.html
 report.json
 sessions.csv
 *.pcapng
+gui_preview.html
+pcapfor_gui.html

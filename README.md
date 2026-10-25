@@ -1,11 +1,13 @@
-# live_pcap_forensics_analyzer 🔍
+<p align="center"><img src="assets/logo.svg" width="210" alt="pcap for"></p>
+
+# pcap for
 
 **외부 라이브러리 없이 Python 표준 라이브러리만으로 만든 PCAP 네트워크 포렌식 분석기**
 
 pcap/pcapng 캡처 파일을 읽어 공격 흔적(포트 스캔, 브루트포스, 웹 공격, DNS 터널링,
 C2 비커닝, ARP 스푸핑, 평문 자격증명 노출)을 자동 탐지하고, 근거·MITRE ATT&CK
-매핑·대응 권고가 담긴 리포트를 생성합니다. 파일 분석 외에 **실시간 탐지 모드**(`--live`)로
-내 PC의 트래픽을 직접 감시할 수도 있습니다.
+매핑·대응 권고가 담긴 리포트와 **GUI 대시보드**를 생성합니다. 파일 분석 외에
+**실시간 탐지 모드**(`--live`)로 내 PC의 트래픽을 직접 감시할 수도 있습니다.
 
 > 컴퓨터네트워크2 수업 프로젝트.
 > [ngnicky-ai/pcap-forensics-analyzer](https://github.com/ngnicky-ai/pcap-forensics-analyzer)
@@ -19,25 +21,46 @@ C2 비커닝, ARP 스푸핑, 평문 자격증명 노출)을 자동 탐지하고,
 - **파일 포맷**: pcap(리틀/빅엔디언, 마이크로초/나노초 타임스탬프), pcapng(SHB/IDB/EPB, if_tsresol 옵션), 잘린 파일 허용
 - **프로토콜 디코딩**: Ethernet(+VLAN/QinQ), ARP, IPv4, IPv6(확장 헤더 체인), TCP, UDP, ICMP, DNS(압축 포인터+루프 방지), HTTP/1.x(chunked, gzip/deflate, 파이프라이닝)
 - **TCP 스트림 재조립**: 순서 뒤바뀜, 재전송, 겹침 세그먼트 처리
+- **GUI 대시보드**: 다크 SOC 오버뷰 + 호스트 토폴로지 맵, 단일 HTML (서버·프레임워크 없음)
 - **증거 무결성**: 입력 파일 SHA-256 기록, 모든 시각 UTC
 - **합성 샘플 생성기**: Wireshark/Npcap이 없는 환경에서도 시나리오별 가짜 트래픽을 직접 만들어 검증 가능 (실제 멀웨어 없음, 전부 예약/사설 대역)
 
 ## 빠른 시작
 
 ```bash
-git clone https://github.com/solmin111/live-pcap_forensics_analyzer.git
-cd live-pcap_forensics_analyzer
+git clone https://github.com/solmin111/pcap-for.git
+cd pcap-for
 
 # (선택) 합성 샘플 생성 — 저장소에 이미 포함되어 있음
 python tools/make_samples.py
 
 # 종합 샘플 분석
-python -m live_pcap_forensics_analyzer samples/99_mixed.pcap -v
+python -m pcapfor samples/99_mixed.pcap -v
+
+# GUI 대시보드 (단일 HTML 생성 후 브라우저 자동 오픈)
+python -m pcapfor samples/99_mixed.pcap --ioc iocs_example.txt --gui
 
 # IOC 매칭 + 리포트 저장
-python -m live_pcap_forensics_analyzer samples/99_mixed.pcap --ioc iocs_example.txt \
+python -m pcapfor samples/99_mixed.pcap --ioc iocs_example.txt \
     --html report.html --json report.json --csv sessions.csv
 ```
+
+## GUI 대시보드 (`--gui`)
+
+분석 결과를 다크 SOC 스타일 대시보드로 보여줍니다. 데이터가 JSON으로 내장된
+**단일 self-contained HTML** 이라 서버 없이 열리고, 그대로 제출·공유할 수 있습니다.
+
+| Overview | Topology |
+|---|---|
+| ![overview](assets/screenshot_overview.png) | ![topology](assets/screenshot_topology.png) |
+
+- **Overview**: 요약 카드 · 트래픽 타임라인 · 프로토콜 분포 · Top talkers · 우측 실시간 탐지 피드(클릭 시 증거/MITRE/대응 펼침)
+- **Topology**: 호스트 노드 그래프(자체 구현 force 레이아웃) — 내부/외부/탐지 연루 색 구분, 엣지 굵기=전송량, 노드 클릭 시 호스트 상세
+- **Sessions / Detections**: 정렬 가능한 세션 테이블(탐지 연루 하이라이트), 전체 탐지 상세
+
+실시간 모드와도 결합됩니다 — `--live --gui` 는 localhost 임시 포트에 같은 대시보드를
+띄우고 2초 주기로 갱신합니다(pkt/s, 경과 시간, 실시간 탐지 피드). 서버는 127.0.0.1
+전용이며 캡처 종료와 함께 내려갑니다.
 
 ### CLI 옵션
 
@@ -57,9 +80,10 @@ python -m live_pcap_forensics_analyzer samples/99_mixed.pcap --ioc iocs_example.
 > 자기 PC를 지나는 트래픽을 감시하는 방어·학습용 기능입니다.
 
 ```bash
-python -m live_pcap_forensics_analyzer --live                       # 실시간 감시 시작
-python -m live_pcap_forensics_analyzer --live --save evidence.pcap  # 캡처 증거 저장
-python -m live_pcap_forensics_analyzer --live --ioc iocs_example.txt --sweep 5 --duration 300
+python -m pcapfor --live                       # 실시간 감시 시작
+python -m pcapfor --live --save evidence.pcap  # 캡처 증거 저장
+python -m pcapfor --live --ioc iocs_example.txt --sweep 5 --duration 300
+python -m pcapfor --live --gui                  # 라이브 GUI 대시보드 (localhost)
 ```
 
 **관리자 권한 세션이 필요합니다** — 터미널을 "관리자 권한으로 실행"으로 연 뒤 실행하세요.
