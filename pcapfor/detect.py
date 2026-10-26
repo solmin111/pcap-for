@@ -48,6 +48,11 @@ class Finding:
         return SEVERITY_ORDER.get(self.severity, 0)
 
 
+def _b64(raw: bytes) -> bytes:
+    """패딩이 틀려도 죽지 않는 base64 디코드 (와이어의 값은 깨져 있을 수 있다)."""
+    return base64.b64decode(raw + b"=" * (-len(raw) % 4))
+
+
 def shannon_entropy(s: str) -> float:
     if not s:
         return 0.0
@@ -211,6 +216,58 @@ def detect_cleartext_credentials(data) -> list[Finding]:
                 recommendation="FTPS/SFTP 전환, 노출된 비밀번호 즉시 변경",
                 session_ids=[sess.sid], ts=sess.first_ts,
             ))
+    # SMTP: AUTH LOGIN/PLAIN 평문(base64) 인증 + 메일 유출 징후
+    # (Agent Tesla 류 정보 탈취 멀웨어의 전형적 유출 경로 — QA 이미지 03에서 실측)
+    for sess, c2s, s2c in data.smtp_streams:
+        user = pw = None
+        lines = c2s.split(b"\r\n")
+        for i, line in enumerate(lines):
+            up = line.strip().upper()
+            if up.startswith(b"AUTH LOGIN"):
+                parts = line.strip().split()
+                try:
+                    if len(parts) >= 3:          # AUTH LOGIN <user_b64>
+                        user = _b64(parts[2]).decode("latin-1")
+                        if i + 1 < len(lines):
+                            pw = _b64(lines[i + 1].strip()).decode("latin-1")
+                    elif i + 2 < len(lines):     # AUTH LOGIN \n user \n pass
+                        user = _b64(lines[i + 1].strip()).decode("latin-1")
+                        pw = _b64(lines[i + 2].strip()).decode("latin-1")
+                except Exception:
+                    user = user or "(base64 디코딩 실패)"
+                break
+            if up.startswith(b"AUTH PLAIN"):
+                parts = line.strip().split()
+                try:
+                    if len(parts) >= 3:
+                        fields = _b64(parts[2]).split(b"\x00")
+                        if len(fields) >= 3:
+                            user = fields[1].decode("latin-1")
+                            pw = fields[2].decode("latin-1")
+                except Exception:
+                    user = "(base64 디코딩 실패)"
+                break
+        if user is None:
+            continue
+        evidence = [f"AUTH 사용자: {user}"]
+        if pw:
+            evidence.append(f"비밀번호: {'*' * min(len(pw), 12)} (캡처에 base64 평문 존재)")
+        rcpt = re.search(rb"RCPT TO:<([^>\r\n]+)>", c2s, re.I)
+        subj = re.search(rb"Subject: ([^\r\n]{1,60})", c2s, re.I)
+        if rcpt:
+            evidence.append(f"수신자: {rcpt.group(1).decode('latin-1')}")
+        if subj:
+            evidence.append(f"메일 제목: {subj.group(1).decode('latin-1', 'replace')}")
+        out.append(Finding(
+            "high", "credential",
+            f"SMTP 평문 자격증명·메일 전송: {sess.key_str}",
+            "SMTP 인증 정보가 암호화 없이 전송되었습니다(base64는 암호화가 아님). "
+            "정보 탈취 멀웨어가 수집 데이터를 메일로 내보내는 경로로도 쓰입니다.",
+            evidence=evidence,
+            mitre="T1048.003 (Exfiltration Over Unencrypted Protocol), T1040",
+            recommendation="해당 계정 비밀번호 즉시 변경, 수신자 주소 차단, 발신 호스트 격리·점검",
+            session_ids=[sess.sid], ts=sess.first_ts,
+        ))
     seen_form = set()
     for sess, tx in data.http_transactions:
         if not tx.request:
