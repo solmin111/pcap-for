@@ -94,6 +94,15 @@ class TestLayers(unittest.TestCase):
         self.assertEqual(pkt.vlan, 100)
         self.assertEqual(pkt.proto, "udp")
 
+    def test_linux_sll_decode(self):
+        # Linux cooked capture(linktype 113): 16바이트 SLL 헤더 + IP
+        ip = craft.ipv4("10.0.0.1", "8.8.8.8", 17,
+                        craft.udp(40000, 53, craft.dns_query("tunnel.example.com")))
+        sll = struct.pack("!HHH8sH", 0, 1, 6, b"\xaa" * 8, 0x0800) + ip
+        pkt = decode(RawPacket(1.0, sll, len(sll), 113, 1))
+        self.assertEqual((pkt.src, pkt.dst, pkt.proto), ("10.0.0.1", "8.8.8.8", "udp"))
+        self.assertEqual(pkt.dport, 53)
+
     def test_arp_decode(self):
         frame = craft.arp_reply("de:ad:be:ef:00:01", "192.168.0.1",
                                 "aa:bb:cc:dd:ee:ff", "192.168.0.2")

@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from ipaddress import ip_address
 from typing import Optional
 
-from .pcapio import LINKTYPE_ETHERNET, LINKTYPE_RAW_IP, RawPacket
+from .pcapio import LINKTYPE_ETHERNET, LINKTYPE_LINUX_SLL, LINKTYPE_RAW_IP, RawPacket
 
 ETH_IPV4 = 0x0800
 ETH_ARP = 0x0806
@@ -82,19 +82,28 @@ def decode(raw: RawPacket) -> Optional[Packet]:
             pkt.vlan = tci & 0x0FFF
             etype = struct.unpack("!H", data[off + 2 : off + 4])[0]
             off += 4
-        body = data[off:]
-        if etype == ETH_ARP:
-            return _decode_arp(pkt, body)
-        if etype == ETH_IPV4:
-            return _decode_ipv4(pkt, body)
-        if etype == ETH_IPV6:
-            return _decode_ipv6(pkt, body)
-        return pkt  # 알 수 없는 ethertype이라도 L2 정보는 유지
+        return _dispatch_ethertype(pkt, etype, data[off:])
+    if raw.linktype == LINKTYPE_LINUX_SLL:
+        # Linux cooked capture: 패킷타입(2)+ARPHRD(2)+주소길이(2)+주소(8)+프로토콜(2)
+        if len(data) < 16:
+            return None
+        etype = struct.unpack("!H", data[14:16])[0]
+        return _dispatch_ethertype(pkt, etype, data[16:])
     if raw.linktype == LINKTYPE_RAW_IP:
         if data and (data[0] >> 4) == 6:
             return _decode_ipv6(pkt, data)
         return _decode_ipv4(pkt, data)
     return None
+
+
+def _dispatch_ethertype(pkt: Packet, etype: int, body: bytes) -> Optional[Packet]:
+    if etype == ETH_ARP:
+        return _decode_arp(pkt, body)
+    if etype == ETH_IPV4:
+        return _decode_ipv4(pkt, body)
+    if etype == ETH_IPV6:
+        return _decode_ipv6(pkt, body)
+    return pkt  # 알 수 없는 ethertype이라도 L2 정보는 유지
 
 
 def _decode_arp(pkt: Packet, b: bytes) -> Optional[Packet]:

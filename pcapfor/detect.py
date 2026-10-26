@@ -23,6 +23,8 @@ THRESHOLDS = {
     "dns_min_queries": 20,         # 터널링 판단 최소 질의 수
     "dns_label_len": 30,           # 의심 서브도메인 평균 길이
     "dns_entropy": 3.5,            # 서브도메인 샤논 엔트로피
+    "dns_len_extreme": 60,         # 이 길이를 넘는 평균 서브도메인은 그 자체로 의심
+    "dns_null_min": 20,            # NULL(qtype 10) 질의 수: iodine 계열 시그니처
     "beacon_min_events": 8,        # 비커닝 판단 최소 연결 수
     "beacon_max_cv": 0.15,         # 간격 변동계수(낮을수록 기계적)
     "beacon_min_interval": 2.0,    # 초
@@ -311,8 +313,12 @@ def _registered_domain(name: str) -> str:
 
 def detect_dns_tunneling(data) -> list[Finding]:
     out = []
-    by_domain = defaultdict(list)  # 등록 도메인 -> [(질의 호스트, 풀 쿼리네임)]
+    # 존(zone)은 2라벨과 3라벨 깊이를 모두 후보로 집계한다.
+    # weberlab.de 처럼 정상 질의가 많은 도메인 아래에 터널 존(io2.weberlab.de)이
+    # 숨어 있으면 2라벨 평균 통계가 희석되어 놓치기 때문. (QA 이미지 04에서 실측)
+    by_domain = defaultdict(list)  # 존 -> [(질의 호스트, 풀 쿼리네임)]
     txt_count = Counter()
+    null_count = Counter()
     nx_by_host = defaultdict(set)  # 질의 호스트 -> {NXDOMAIN 난 등록 도메인}
     dom_first = defaultdict(lambda: float("inf"))
     nx_first = defaultdict(lambda: float("inf"))
@@ -320,21 +326,34 @@ def detect_dns_tunneling(data) -> list[Finding]:
         for qname, qtype in msg.questions:
             if not qname or "." not in qname:
                 continue
-            dom = _registered_domain(qname)
+            # 역방향 조회(PTR) 이름은 니블 단위라 원래 길다 → 터널링 집계에서 제외
+            if qname.rstrip(".").endswith((".in-addr.arpa", ".ip6.arpa")):
+                continue
+            parts = qname.rstrip(".").split(".")
+            zones = []
+            if len(parts) >= 3:
+                zones.append(".".join(parts[-2:]))
+            if len(parts) >= 4:
+                zones.append(".".join(parts[-3:]))
             if not msg.is_response:
-                by_domain[dom].append((src, qname))
-                dom_first[dom] = min(dom_first[dom], mts)
-                if qtype == "TXT":
-                    txt_count[dom] += 1
+                for dom in zones:
+                    by_domain[dom].append((src, qname))
+                    dom_first[dom] = min(dom_first[dom], mts)
+                    if qtype == "TXT":
+                        txt_count[dom] += 1
+                    elif qtype == "NULL":
+                        null_count[dom] += 1
             elif msg.rcode == 3:
+                dom = _registered_domain(qname)
                 nx_by_host[src].add(dom)  # src = 질의를 보냈던 호스트 (analyzer가 보정)
                 nx_first[src] = min(nx_first[src], mts)
+    suspicious_zones = {}
     for dom, queries in by_domain.items():
         if len(queries) < THRESHOLDS["dns_min_queries"]:
             continue
         subs = []
         for _, q in queries:
-            sub = q[: -(len(dom) + 1)] if q.endswith("." + dom) else ""
+            sub = q[: -(len(dom) + 1)] if q.rstrip(".").endswith("." + dom) else ""
             if sub:
                 subs.append(sub)
         if not subs:
@@ -342,26 +361,33 @@ def detect_dns_tunneling(data) -> list[Finding]:
         uniq_ratio = len(set(subs)) / len(subs)
         avg_len = sum(len(s) for s in subs) / len(subs)
         avg_entropy = sum(shannon_entropy(s) for s in subs) / len(subs)
-        suspicious = (
-            avg_len >= THRESHOLDS["dns_label_len"]
-            and avg_entropy >= THRESHOLDS["dns_entropy"]
-            and uniq_ratio > 0.8
-        )
-        if suspicious:
-            srcs = sorted({s for s, _ in queries})
-            out.append(Finding(
-                "critical", "c2",
-                f"DNS 터널링 의심: {dom}",
-                f"{dom} 으로 질의 {len(queries)}건. 서브도메인 평균 길이 {avg_len:.0f}자, "
-                f"평균 엔트로피 {avg_entropy:.2f}, 고유 비율 {uniq_ratio:.0%} — "
-                f"데이터를 서브도메인에 인코딩해 내보내는 패턴입니다.",
-                evidence=[f"질의 호스트: {', '.join(srcs[:5])}",
-                          f"서브도메인 예시: {subs[0][:60]}...",
-                          f"TXT 질의 비율: {txt_count[dom]}/{len(queries)}"],
-                mitre="T1071.004 (DNS), T1048 (Exfiltration)",
-                recommendation="해당 도메인 차단 및 질의 호스트 격리, DNS 로그로 유출량 추정",
-                ts=dom_first[dom],
-            ))
+        # 세 가지 패턴 중 하나면 의심: ① 길이+엔트로피+고유율 복합(dnscat 류 합성 패턴)
+        # ② 평균 길이가 극단적(정상 서비스엔 없음) ③ NULL 타입 질의 다발(iodine 시그니처)
+        rule_mix = (avg_len >= THRESHOLDS["dns_label_len"]
+                    and avg_entropy >= THRESHOLDS["dns_entropy"]
+                    and uniq_ratio > 0.8)
+        rule_len = avg_len >= THRESHOLDS["dns_len_extreme"]
+        rule_null = null_count[dom] >= THRESHOLDS["dns_null_min"]
+        if rule_mix or rule_len or rule_null:
+            suspicious_zones[dom] = (queries, subs, uniq_ratio, avg_len, avg_entropy)
+    for dom, (queries, subs, uniq_ratio, avg_len, avg_entropy) in suspicious_zones.items():
+        # 더 구체적인 하위 존이 함께 의심되면 상위 존 중복 보고는 생략
+        if any(child != dom and child.endswith("." + dom) for child in suspicious_zones):
+            continue
+        srcs = sorted({s for s, _ in queries})
+        out.append(Finding(
+            "critical", "c2",
+            f"DNS 터널링 의심: {dom}",
+            f"{dom} 으로 질의 {len(queries)}건. 서브도메인 평균 길이 {avg_len:.0f}자, "
+            f"평균 엔트로피 {avg_entropy:.2f}, 고유 비율 {uniq_ratio:.0%} — "
+            f"데이터를 서브도메인에 인코딩해 내보내는 패턴입니다.",
+            evidence=[f"질의 호스트: {', '.join(srcs[:5])}",
+                      f"서브도메인 예시: {subs[0][:60]}...",
+                      f"TXT 질의: {txt_count[dom]}건 · NULL 질의: {null_count[dom]}건 / 총 {len(queries)}건"],
+            mitre="T1071.004 (DNS), T1048 (Exfiltration)",
+            recommendation="해당 도메인 차단 및 질의 호스트 격리, DNS 로그로 유출량 추정",
+            ts=dom_first[dom],
+        ))
     for host, failed_doms in nx_by_host.items():
         if len(failed_doms) >= THRESHOLDS["dns_min_queries"]:
             avg_ent = sum(shannon_entropy(d.split(".")[0]) for d in failed_doms) / len(failed_doms)

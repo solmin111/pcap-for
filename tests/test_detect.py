@@ -63,6 +63,30 @@ class TestDetectors(unittest.TestCase):
         # 정상 도메인(naver 등)은 탐지에 등장하면 안 된다
         self.assertFalse(any("naver" in t for t in _titles(r)))
 
+    def test_dns_tunneling_iodine_pattern(self):
+        # 실측(QA 이미지 04) 기반: 반복 폴링이라 고유율·엔트로피는 낮지만
+        # 평균 길이가 극단적이고 qtype 이 NULL 인 iodine 패턴
+        from pcapfor import craft
+        pkts = []
+        # DNS 라벨은 63바이트 제한 → 50자 라벨 2개로 긴 서브도메인 구성 (저엔트로피 반복)
+        label = "aacaaaaadb" * 5
+        for i in range(25):
+            name = f"{label}.{label}.io2.tunnel-test.de"
+            craft.udp_packet(pkts, 1000.0 + i, "10.0.0.9", "10.0.0.53",
+                             43000 + (i % 3), 53,
+                             craft.dns_query(name, qtype=10, txid=0x5000 + i))
+        f = tempfile.NamedTemporaryFile(delete=False, suffix=".pcap")
+        f.close()
+        write_pcap(f.name, pkts)
+        try:
+            r = analyze(f.name)
+        finally:
+            os.unlink(f.name)
+        titles = _titles(r, "c2")
+        self.assertTrue(any("DNS 터널링" in t for t in titles))
+        # 하위 존이 보고되고 상위 존 중복 보고는 없어야 한다
+        self.assertFalse(any(t.endswith("tunnel-test.de") and "io2" not in t for t in titles))
+
     def test_beaconing(self):
         r = _analyze_scenario(make_samples.make_beacon)
         self.assertTrue(any("비커닝" in t for t in _titles(r, "c2")))

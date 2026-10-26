@@ -15,6 +15,7 @@ from typing import Iterator
 # 링크 타입 (우리가 디코딩할 수 있는 것)
 LINKTYPE_ETHERNET = 1
 LINKTYPE_RAW_IP = 101
+LINKTYPE_LINUX_SLL = 113   # Linux cooked capture (tcpdump -i any)
 
 PCAP_MAGIC_US = 0xA1B2C3D4   # 마이크로초 타임스탬프
 PCAP_MAGIC_NS = 0xA1B23C4D   # 나노초 타임스탬프

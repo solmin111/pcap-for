@@ -9,7 +9,7 @@ import struct
 from dataclasses import dataclass, field
 from ipaddress import ip_address
 
-QTYPE = {1: "A", 2: "NS", 5: "CNAME", 6: "SOA", 12: "PTR", 15: "MX",
+QTYPE = {1: "A", 2: "NS", 5: "CNAME", 6: "SOA", 10: "NULL", 12: "PTR", 15: "MX",
          16: "TXT", 28: "AAAA", 33: "SRV", 255: "ANY"}
 
 
