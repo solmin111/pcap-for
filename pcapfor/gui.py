@@ -2,8 +2,6 @@
 
 - 파일 모드: 결과를 JSON으로 직렬화해 템플릿에 심은 단일 self-contained HTML 생성
 - 라이브 모드: stdlib http.server 로 같은 템플릿을 서빙하고 /api/state 를 폴링시킴
-
-프론트엔드(D01 다크 SOC + D08 토폴로지)는 gui_template.TEMPLATE 에 있다.
 """
 from __future__ import annotations
 

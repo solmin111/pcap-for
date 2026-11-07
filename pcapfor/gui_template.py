@@ -1,4 +1,4 @@
-"""GUI 프론트엔드 템플릿 (D01 다크 SOC 대시보드 + D08 토폴로지 맵).
+"""GUI 프론트엔드 템플릿.
 
 __PAYLOAD__ 자리에 JSON 페이로드가 주입된다. 외부 리소스 없이 완전 self-contained.
 mode=="live" 면 /api/state 를 2초 폴링해 화면을 갱신한다.
