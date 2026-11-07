@@ -66,8 +66,6 @@ python -m pcapfor capture.pcap --ioc iocs.txt \
 
 ## 실시간 탐지 (`--live`)
 
-> ⚠ **본인이 소유하거나 관리 권한을 위임받은 호스트/네트워크에서만 사용하세요.**
-
 ```bash
 python -m pcapfor --live                       # 실시간 감시 시작
 python -m pcapfor --live --save evidence.pcap  # 캡처 증거 저장
