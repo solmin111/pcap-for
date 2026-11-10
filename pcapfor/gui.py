@@ -131,7 +131,7 @@ def _findings_payload(findings):
         "sev": f.severity, "cat": f.category, "title": f.title,
         "desc": f.description, "evidence": list(f.evidence),
         "mitre": f.mitre, "reco": f.recommendation, "sids": list(f.session_ids),
-        # inf/0 은 "시각 미상" — JSON 표준엔 Infinity 가 없으므로 0 으로 정규화
+        # inf/0 은 "시각 미상": JSON 표준엔 Infinity 가 없으므로 0 으로 정규화
         "ts": f.ts if math.isfinite(f.ts) and f.ts > 0 else 0,
     } for f in findings]
 

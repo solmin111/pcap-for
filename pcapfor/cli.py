@@ -31,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--csv", metavar="FILE", help="세션 목록 CSV 저장 경로")
     p.add_argument("-v", "--verbose", action="store_true", help="증거/MITRE/대응까지 출력")
     p.add_argument("--gui", nargs="?", const="pcapfor_gui.html", metavar="FILE",
-                   help="GUI 대시보드 — 파일 모드: 단일 HTML 생성 후 브라우저 오픈"
+                   help="GUI 대시보드 (파일 모드: 단일 HTML 생성 후 브라우저 오픈)"
                         " (기본 pcapfor_gui.html), --live 와 함께: 라이브 GUI 서버")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 

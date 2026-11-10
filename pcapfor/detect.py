@@ -499,7 +499,7 @@ def detect_dns_tunneling(data) -> list[Finding]:
             "critical", "c2",
             f"DNS 터널링 의심: {dom}",
             f"{dom} 으로 질의 {len(queries)}건. 서브도메인 평균 길이 {avg_len:.0f}자, "
-            f"평균 엔트로피 {avg_entropy:.2f}, 고유 비율 {uniq_ratio:.0%} — "
+            f"평균 엔트로피 {avg_entropy:.2f}, 고유 비율 {uniq_ratio:.0%}: "
             f"데이터를 서브도메인에 인코딩해 내보내는 패턴입니다.",
             evidence=[f"질의 호스트: {', '.join(srcs[:5])}",
                       f"서브도메인 예시: {subs[0][:60]}...",
