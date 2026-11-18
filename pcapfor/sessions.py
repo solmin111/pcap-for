@@ -6,7 +6,7 @@ MAX_STREAM_BYTES = 4 * 1024 * 1024
 
 @dataclass
 class Session:
-    sid: int; proto: str; client: str; cport: int; server: str; sport: int; first_ts: float; last_ts: float = 0.0; packets: int = 0; bytes_c2s: int = 0; bytes_s2c: int = 0
+    sid: int; proto: str; client: str; cport: int; server: str; sport: int; first_ts: float; last_ts: float = 0.0; packets: int = 0; bytes_c2s: int = 0; bytes_s2c: int = 0; pkt_first: int = 0; pkt_last: int = 0
     syn_seen: bool = False; synack_seen: bool = False; fin_seen: bool = False; rst_seen: bool = False
     _segs_c2s: dict = field(default_factory=dict, repr=False); _segs_s2c: dict = field(default_factory=dict, repr=False); _isn_c: Optional[int] = None; _isn_s: Optional[int] = None
 
@@ -47,15 +47,13 @@ class SessionTable:
         if s is None:
             client, cport, server, sport = p.src, p.sport, p.dst, p.dport; fresh_syn = p.proto == "tcp" and p.flag(TCP_SYN) and not p.flag(TCP_ACK)
             if not fresh_syn and p.sport < 1024 <= p.dport: client, cport, server, sport = p.dst, p.dport, p.src, p.sport
-            s = Session(sid=len(self.sessions) + 1, proto=p.proto, client=client, cport=cport, server=server, sport=sport, first_ts=p.ts, last_ts=p.ts); self._map[key] = s; self.sessions.append(s)
+            s = Session(sid=len(self.sessions) + 1, proto=p.proto, client=client, cport=cport, server=server, sport=sport, first_ts=p.ts, last_ts=p.ts, pkt_first=p.number); self._map[key] = s; self.sessions.append(s)
         if (p.proto == "tcp" and p.flag(TCP_SYN) and p.flag(TCP_ACK) and (p.src, p.sport) == (s.client, s.cport) and not s.syn_seen): s.client, s.cport, s.server, s.sport = s.server, s.sport, s.client, s.cport
-        c2s = (p.src, p.sport) == (s.client, s.cport); s.packets += 1; s.last_ts = max(s.last_ts, p.ts)
+        c2s = (p.src, p.sport) == (s.client, s.cport); s.packets += 1; s.last_ts = max(s.last_ts, p.ts); s.pkt_last = max(s.pkt_last, p.number)
         if c2s: s.bytes_c2s += len(p.payload)
         else: s.bytes_s2c += len(p.payload)
         if p.proto == "tcp":
-            if p.flag(TCP_SYN) and not p.flag(TCP_ACK):
-                s.syn_seen = True
-                if c2s: s._isn_c = p.seq
+            if p.flag(TCP_SYN) and not p.flag(TCP_ACK): s.syn_seen = True; s._isn_c = p.seq if c2s else s._isn_c
             if p.flag(TCP_SYN) and p.flag(TCP_ACK):
                 s.synack_seen = True
                 if not c2s: s._isn_s = p.seq

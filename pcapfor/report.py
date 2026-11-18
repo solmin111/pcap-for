@@ -27,9 +27,9 @@ def to_json(r, path):
 
 def to_csv(r, path):
     with open(path, "w", encoding="utf-8-sig", newline="") as fp:
-        w = csv.writer(fp); w.writerow(["sid", "proto", "client", "cport", "server", "sport", "first", "last", "packets", "bytes_c2s", "bytes_s2c", "handshake", "closed"])
+        w = csv.writer(fp); w.writerow(["sid", "proto", "client", "cport", "server", "sport", "first", "last", "packets", "bytes_c2s", "bytes_s2c", "handshake", "closed", "pkt_first", "pkt_last"])
         for s in r.data.sessions:
-            w.writerow([s.sid, s.proto, s.client, s.cport, s.server, s.sport, _fmt_ts(s.first_ts), _fmt_ts(s.last_ts), s.packets, s.bytes_c2s, s.bytes_s2c, "완성" if s.synack_seen else "미완성", "RST" if s.rst_seen else ("FIN" if s.fin_seen else "-")])
+            w.writerow([s.sid, s.proto, s.client, s.cport, s.server, s.sport, _fmt_ts(s.first_ts), _fmt_ts(s.last_ts), s.packets, s.bytes_c2s, s.bytes_s2c, "완성" if s.synack_seen else "미완성", "RST" if s.rst_seen else ("FIN" if s.fin_seen else "-"), s.pkt_first, s.pkt_last])
 
 _CSS = ("body{font-family:'Malgun Gothic',system-ui,sans-serif;margin:24px;background:#fafafa;color:#212121} h1{font-size:22px} h2{font-size:17px;margin-top:28px} " "table{border-collapse:collapse;width:100%;background:#fff;font-size:13px} th,td{border:1px solid #e0e0e0;padding:6px 10px;text-align:left;vertical-align:top} th{background:#eceff1} " ".badge{color:#fff;padding:2px 8px;border-radius:10px;font-size:12px;margin-right:6px;white-space:nowrap} .meta td:first-child{width:110px;color:#616161} " ".ev{color:#455a64;font-size:12px;margin-top:4px;font-family:Consolas,monospace} .mitre{color:#6a1b9a;font-size:12px;margin-top:2px} .rec{color:#1565c0;font-size:12px;margin-top:2px}")
 
